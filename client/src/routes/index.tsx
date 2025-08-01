@@ -30,6 +30,10 @@ function App() {
     scrollToBottom()
   }, [messages])
 
+  useEffect(() => {
+    loadChatHistory()
+  }, [])
+
   const sendChatMessage = async (prompt: string) => {
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -56,7 +60,7 @@ function App() {
           prompt,
           session_id: 'default',
           use_chat_history: true,
-          k: 3
+          k: 3,
         }),
       })
 
@@ -95,17 +99,38 @@ function App() {
     }
   }
 
+  const loadChatHistory = async () => {
+    try {
+      const res = await fetch(`${API_URL}/chat/default`)
+      if (res.ok) {
+        const data = await res.json()
+        const formattedMessages: ChatMessage[] = data.messages.map(
+          (msg: any, index: number) => ({
+            id: `history-${index}`,
+            role: msg.message_type === 'user' ? 'user' : 'assistant',
+            content: msg.content,
+          }),
+        )
+        setMessages(formattedMessages)
+      } else {
+        setError('Failed to load chat history')
+      }
+    } catch (err) {
+      setError('Failed to load chat history')
+    }
+  }
+
   const { mutateAsync: uploadDocument } = useMutation({
     mutationKey: ['document'],
     mutationFn: async (file: File) => {
       const formData = new FormData()
       formData.append('file', file)
-      
+
       const res = await fetch(`${API_URL}/document`, {
         method: 'POST',
         body: formData,
       })
-      
+
       if (res.ok) {
         return res.json()
       } else {
@@ -154,7 +179,9 @@ function App() {
               />
               {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
               {selectedFile && (
-                <p className="text-green-600 text-sm mt-1">Selected: {selectedFile.name}</p>
+                <p className="text-green-600 text-sm mt-1">
+                  Selected: {selectedFile.name}
+                </p>
               )}
             </div>
             <button

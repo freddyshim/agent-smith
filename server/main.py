@@ -153,6 +153,16 @@ def read_root():
     return "Hello, world!"
 
 
+@app.get("/chat/{session_id}")
+async def get_full_chat_history(session_id: str):
+    """Retrieve full chat history for a session"""
+    try:
+        history = await get_chat_history(session_id, limit=1000)  # Get all messages
+        return {"messages": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/document")
 async def upload_document(
     file: UploadFile = File(...),
