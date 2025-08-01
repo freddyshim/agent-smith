@@ -1,12 +1,15 @@
 from typing import Optional, List
 import tempfile
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import PGVector
 from langchain.embeddings.base import Embeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from ollama import AsyncClient
@@ -17,6 +20,9 @@ from sentence_transformers import SentenceTransformer
 # Global variables
 vectorstore = None
 retriever = None
+
+# PostgreSQL connection string from environment
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 # Embeddings
@@ -116,9 +122,11 @@ async def upload_document(
             splits = text_splitter.split_documents(docs)
             
             # Create vectorstore
-            vectorstore = Chroma.from_documents(
+            vectorstore = PGVector.from_documents(
                 documents=splits, 
-                embedding=SentenceTransformerEmbeddings()
+                embedding=SentenceTransformerEmbeddings(),
+                connection_string=DATABASE_URL,
+                collection_name="document_embeddings"
             )
             retriever = vectorstore.as_retriever()
             
