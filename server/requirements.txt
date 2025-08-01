@@ -3,6 +3,7 @@ aiohttp==3.12.13
 aiosignal==1.4.0
 annotated-types==0.7.0
 anyio==4.9.0
+asyncpg==0.30.0
 attrs==25.3.0
 backoff==2.2.1
 bcrypt==4.3.0
@@ -11,8 +12,7 @@ build==1.2.2.post1
 cachetools==5.5.2
 certifi==2025.6.15
 charset-normalizer==3.4.2
-psycopg2-binary==2.9.10
-pgvector==0.4.1
+chromadb==1.0.15
 click==8.2.1
 coloredlogs==15.0.1
 dataclasses-json==0.6.7
@@ -90,10 +90,12 @@ opentelemetry-semantic-conventions==0.55b1
 orjson==3.10.18
 overrides==7.7.0
 packaging==24.2
+pgvector==0.4.1
 pillow==11.2.1
 posthog==5.4.0
 propcache==0.3.2
 protobuf==5.29.5
+psycopg2-binary==2.9.10
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pybase64==1.4.1

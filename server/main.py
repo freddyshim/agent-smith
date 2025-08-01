@@ -2,6 +2,9 @@ from typing import Optional, List
 import tempfile
 import os
 from dotenv import load_dotenv
+import asyncpg
+import json
+from datetime import datetime
 
 load_dotenv()
 
@@ -20,6 +23,7 @@ from sentence_transformers import SentenceTransformer
 # Global variables
 vectorstore = None
 retriever = None
+db_pool = None
 
 # PostgreSQL connection string from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -39,6 +43,10 @@ class SentenceTransformerEmbeddings(Embeddings):
 
 # API
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    await init_database()
 
 origins = ["http://localhost:3000"]
 
@@ -66,6 +74,62 @@ class DocumentResponse(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str
     k: Optional[int] = 1
+    session_id: str = "default"
+    use_chat_history: Optional[bool] = True
+
+
+# Database functions
+async def init_database():
+    """Initialize database connection pool and create tables"""
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    
+    # Read and execute schema
+    with open('db/schema.sql', 'r') as f:
+        schema = f.read()
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(schema)
+
+
+async def store_chat_message(session_id: str, message_type: str, content: str, metadata: Optional[dict] = None):
+    """Store a chat message in the database"""
+    if db_pool is None:
+        return
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO chat_logs (session_id, message_type, content, metadata)
+            VALUES ($1, $2, $3, $4)
+            """,
+            session_id, message_type, content, json.dumps(metadata or {})
+        )
+
+
+async def get_chat_history(session_id: str, limit: int = 10) -> List[dict]:
+    """Retrieve recent chat history for a session"""
+    if db_pool is None:
+        return []
+    
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT message_type, content, timestamp, metadata
+            FROM chat_logs
+            WHERE session_id = $1
+            ORDER BY timestamp ASC
+            LIMIT $2
+            """,
+            session_id, limit
+        )
+    
+    return [{
+        'message_type': row['message_type'],
+        'content': row['content'],
+        'timestamp': row['timestamp'],
+        'metadata': json.loads(row['metadata'])
+    } for row in rows]
 
 
 # Methods
@@ -144,13 +208,16 @@ async def upload_document(
 
 
 @app.post("/chat")
-def read_item(body: ChatRequest, response_model=StreamingResponse):
+async def read_item(body: ChatRequest, response_model=StreamingResponse):
     global retriever, vectorstore
     
     if retriever is None or vectorstore is None:
         raise HTTPException(status_code=400, detail="No documents indexed. Please index documents first.")
     
     try:
+        # Store user message
+        await store_chat_message(body.session_id, "user", body.prompt)
+        
         # Update retriever with k parameter
         retriever = vectorstore.as_retriever(search_kwargs={"k": body.k})
         
@@ -158,16 +225,36 @@ def read_item(body: ChatRequest, response_model=StreamingResponse):
         context_docs = retriever.get_relevant_documents(body.prompt)
         context = format_docs(context_docs)
         
+        # Get chat history if requested
+        chat_history = ""
+        if body.use_chat_history:
+            history = await get_chat_history(body.session_id, limit=6)  # Last 3 exchanges
+            if history:
+                chat_history = "\n\nPrevious conversation context:\n"
+                for msg in history:
+                    role = "User" if msg['message_type'] == "user" else "Assistant"
+                    chat_history += f"{role}: {msg['content']}\n"
+        
         # Create full prompt
         full_prompt = f"""You are an assistant that answers questions based on the context given. Use three sentences maximum and keep the answer concise. Do not refer to the provided context directly, but rather use the information to shape your answer. Do not answer questions that are irrelevant to the given context but instead say that you don't know the answer to the question.
 
 Question: {body.prompt}
 
-Context: {context}
+Context: {context}{chat_history}
 """
         
-        # Get answer from Ollama
-        return StreamingResponse(stream_chat_completion(full_prompt))
+        # Get answer from Ollama and store it
+        async def stream_and_store():
+            response_parts = []
+            async for token in stream_chat_completion(full_prompt):
+                response_parts.append(token)
+                yield token
+            
+            # Store complete response
+            full_response = ''.join(response_parts)
+            await store_chat_message(body.session_id, "assistant", full_response)
+        
+        return StreamingResponse(stream_and_store())
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -54,6 +54,9 @@ function App() {
         },
         body: JSON.stringify({
           prompt,
+          session_id: 'default',
+          use_chat_history: true,
+          k: 3
         }),
       })
 
